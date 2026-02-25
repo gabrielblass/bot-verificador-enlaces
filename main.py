@@ -1,68 +1,132 @@
 import os
 import telebot
+import re
 import logging
 from flask import Flask
 from threading import Thread
 
-# ---------------- CONFIGURACIÓN DE LOGS ----------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# ---------------- CONFIG ----------------
+logging.basicConfig(level=logging.INFO)
 
-# ---------------- TOKEN ----------------
 TOKEN = os.environ.get("BOT_TOKEN")
-
 if not TOKEN:
-    logging.error("BOT_TOKEN no está configurado")
     raise RuntimeError("BOT_TOKEN no configurado")
 
-bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(TOKEN, parse_mode="Markdown")
 app = Flask(__name__)
 
-# ---------------- FLASK KEEP-ALIVE ----------------
+MAX_LINKS = 30
+
+# ---------------- SERVIDOR ----------------
 @app.route("/")
 def home():
-    return "Bot activo correctamente 🚀", 200
+    return "Verificador PRO 🚀", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    logging.info(f"Iniciando servidor Flask en puerto {port}")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-# ---------------- COMANDOS DEL BOT ----------------
+# ---------------- EXTRAER USERNAME ----------------
+def extract_username(url):
+    match = re.search(r"t\.me/([a-zA-Z0-9_]+)", url)
+    if match:
+        username = match.group(1)
+
+        # Ignorar enlaces tipo share o joinchat
+        if "share" in username.lower():
+            return None
+        return username
+    return None
+
+# ---------------- VALIDAR LINK CON API ----------------
+def check_telegram_chat(username):
+    try:
+        chat = bot.get_chat(f"@{username}")
+        members = bot.get_chat_member_count(chat.id)
+
+        name = chat.title if chat.title else username
+
+        return f"✅ ACTIVO\n📛 {name}\n👥 {members} miembros"
+
+    except Exception as e:
+        logging.error(f"Error con {username}: {e}")
+        return "❌ CAÍDO / PRIVADO"
+
+# ---------------- START ----------------
 @bot.message_handler(commands=["start"])
-def start_message(message):
-    logging.info(f"/start usado por {message.from_user.id}")
+def start(message):
     bot.reply_to(
         message,
-        "¡Bienvenido al <b>Verificador de Enlaces</b> 🔗\n\n"
-        "Envíame los links que deseas revisar."
+        "Envíame enlaces públicos de Telegram.\n"
+        "Te mostraré nombre y número de miembros."
     )
 
+# ---------------- PROCESAMIENTO ----------------
 @bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    logging.info(f"Mensaje recibido de {message.from_user.id}")
-    bot.reply_to(
-        message,
-        "Recibí tu mensaje 📩\n"
-        "Estoy preparándome para procesar los enlaces..."
-    )
+def handle_links(message):
+    urls = re.findall(r'https?://t\.me/[^\s]+', message.text)
 
-# ---------------- INICIO PRINCIPAL ----------------
+    if not urls:
+        bot.reply_to(message, "No encontré enlaces válidos.")
+        return
+
+    # Eliminar duplicados
+    urls = list(set(urls))
+
+    if len(urls) > MAX_LINKS:
+        bot.reply_to(message, f"Máximo {MAX_LINKS} enlaces.")
+        return
+
+    msg_wait = bot.reply_to(message, f"🔍 Revisando {len(urls)} enlaces...")
+
+    resultados = []
+
+    for url in urls:
+        username = extract_username(url)
+
+        if not username:
+            continue  # ignora links share o inválidos
+
+        estado = check_telegram_chat(username)
+        resultados.append(f"{estado}\n🔗 https://t.me/{username}")
+
+    if not resultados:
+        bot.edit_message_text(
+            "No encontré enlaces válidos para revisar.",
+            message.chat.id,
+            msg_wait.message_id
+        )
+        return
+
+    reporte = "*📊 RESULTADO:*\n\n" + "\n\n".join(resultados)
+
+    try:
+        bot.edit_message_text(
+            reporte,
+            message.chat.id,
+            msg_wait.message_id,
+            disable_web_page_preview=True
+        )
+    except:
+        bot.send_message(
+            message.chat.id,
+            reporte,
+            disable_web_page_preview=True
+        )
+
+# ---------------- MAIN ----------------
 def main():
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
-    logging.info("Bot iniciado correctamente")
+    logging.info("Bot iniciado")
 
-    # Reconexión automática si hay error
     while True:
         try:
-            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
+            bot.infinity_polling(skip_pending=True)
         except Exception as e:
-            logging.error(f"Error en polling: {e}")
+            logging.error(f"Error polling: {e}")
 
 if __name__ == "__main__":
     main()

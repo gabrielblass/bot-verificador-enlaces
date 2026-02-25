@@ -1,43 +1,49 @@
+import os
 import telebot
 from flask import Flask
 from threading import Thread
-import os
 
-# Configuración del bot
-TOKEN = os.environ.get('BOT_TOKEN')
+# Obtener token desde variable de entorno
+TOKEN = os.environ.get("BOT_TOKEN")
+
+if not TOKEN:
+    raise Exception("BOT_TOKEN no está configurado")
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "Bot de Enlaces Online"
+    return "Bot activo correctamente 🚀"
 
-def run_server():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "¡Bienvenido al Verificador de Enlaces! Envíame los links que quieres revisar.")
+@bot.message_handler(commands=["start"])
+def start_message(message):
+    bot.reply_to(
+        message,
+        "¡Bienvenido al Verificador de Enlaces! 🔗\n\nEnvíame los links que deseas revisar."
+    )
 
 @bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    # Aquí es donde programaremos la lógica para verificar si el link sirve
-    bot.reply_to(message, "Recibí tu lista. Estoy preparándome para validarlos...")
+def handle_all_messages(message):
+    bot.reply_to(
+        message,
+        "Recibí tu mensaje 📩\nEstoy procesando los enlaces..."
+    )
 
 if __name__ == "__main__":
-    Thread(target=run_server).start()
-    bot.infinity_polling()
-000))
-    app_web.run(host="0.0.0.0", port=port)
+    # Ejecutar Flask en segundo plano
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
 
-# =========================
-# CONFIGURACIÓN
-# =========================
-TOKEN_BOT = "8118811284:AAGfPxDdtjfHe0_c5S6vv-VGIZjgN-aoAj0"
-ID_GRUPO_PRINCIPAL = -1003190310538
-USUARIOS_AUTORIZADOS = [8290078424, 1243433271]
-ARCHIVO_DB = "enviados.txt"
+    print("Bot iniciado correctamente...")
+
+    # Iniciar bot
+    bot.infinity_polling(skip_pending=True)txt"
 
 TEMAS = {
     "Casting Argentina": 2,

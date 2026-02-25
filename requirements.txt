@@ -1,5 +1,3 @@
 pyTelegramBotAPI
 Flask
-ests
-flask
-gunicorn
+requests

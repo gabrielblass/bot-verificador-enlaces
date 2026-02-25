@@ -2,11 +2,12 @@ import os
 import telebot
 import re
 import logging
+import time
 from flask import Flask
 from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ================= CONFIGURACIÓN =================
+# ================= CONFIG =================
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,16 +18,15 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Memoria temporal por usuario
 user_results = {}
+MAX_LINKS = 50
+EXPIRATION_TIME = 300  # 5 minutos
 
-MAX_LINKS = 50  # límite de seguridad
-
-# ================= SERVIDOR FLASK =================
+# ================= SERVIDOR =================
 
 @app.route("/")
 def home():
-    return "Bot Verificador PRO activo 🚀", 200
+    return "Bot PRO Activo 🚀", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -35,13 +35,13 @@ def run_flask():
 # ================= UTILIDADES =================
 
 def extract_username(url):
-    """
-    Extrae el username de un enlace t.me
-    Ignora enlaces tipo share o inválidos
-    """
     match = re.search(r"t\.me/([a-zA-Z0-9_]+)", url)
     if match:
         username = match.group(1)
+
+        # Ignorar enlaces tipo + (invitaciones privadas)
+        if username.startswith("+"):
+            return None
 
         if "share" in username.lower():
             return None
@@ -51,16 +51,9 @@ def extract_username(url):
 
 
 def check_chat(username):
-    """
-    Verifica si el chat existe.
-    Si es público obtiene nombre real.
-    Si es privado muestra username.
-    Si no existe devuelve None.
-    """
     try:
         chat = bot.get_chat(f"@{username}")
 
-        # Si es chat privado de usuario o bot, lo ignoramos
         if chat.type == "private":
             return None
 
@@ -68,32 +61,39 @@ def check_chat(username):
 
         return {
             "name": name,
-            "link": f"https://t.me/{username}",
-            "private": False
+            "link": f"https://t.me/{username}"
         }
 
-    except Exception:
-        # Puede ser privado o inaccesible
-        return {
-            "name": username,
-            "link": f"https://t.me/{username}",
-            "private": True
-        }
+    except:
+        return None
 
-# ================= COMANDO START =================
+def clean_expired_sessions():
+    current_time = time.time()
+    expired_users = []
+
+    for user_id, data in user_results.items():
+        if current_time - data["timestamp"] > EXPIRATION_TIME:
+            expired_users.append(user_id)
+
+    for user_id in expired_users:
+        del user_results[user_id]
+
+# ================= START =================
 
 @bot.message_handler(commands=["start"])
 def start(message):
     bot.reply_to(
         message,
         "🔎 Envíame enlaces de Telegram.\n"
-        "Los organizaré automáticamente en válidos e inválidos."
+        "Los validaré todos juntos."
     )
 
-# ================= PROCESAR MENSAJES =================
+# ================= PROCESAMIENTO PRINCIPAL =================
 
 @bot.message_handler(func=lambda message: True)
 def handle_links(message):
+
+    clean_expired_sessions()
 
     urls = re.findall(r'https?://t\.me/[^\s]+', message.text)
     urls = list(set(urls))  # eliminar duplicados
@@ -103,8 +103,10 @@ def handle_links(message):
         return
 
     if len(urls) > MAX_LINKS:
-        bot.reply_to(message, f"⚠️ Máximo permitido: {MAX_LINKS} enlaces.")
+        bot.reply_to(message, f"⚠️ Máximo {MAX_LINKS} enlaces.")
         return
+
+    msg = bot.reply_to(message, "🔍 Analizando enlaces...")
 
     validos = []
     invalidos = []
@@ -112,6 +114,7 @@ def handle_links(message):
     for url in urls:
         username = extract_username(url)
         if not username:
+            invalidos.append(url)
             continue
 
         data = check_chat(username)
@@ -121,13 +124,13 @@ def handle_links(message):
         else:
             invalidos.append(url)
 
-    # Guardamos resultados por usuario
+    # Guardar sesión con timestamp
     user_results[message.from_user.id] = {
         "validos": validos,
-        "invalidos": invalidos
+        "invalidos": invalidos,
+        "timestamp": time.time()
     }
 
-    # Creamos botones principales
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton(f"🔵 Válidos ({len(validos)})", callback_data="ver_validos")
@@ -136,59 +139,53 @@ def handle_links(message):
         InlineKeyboardButton(f"🔴 No válidos ({len(invalidos)})", callback_data="ver_invalidos")
     )
 
-    bot.reply_to(
-        message,
-        "📊 Revisión completada.\nSelecciona una opción:",
+    bot.edit_message_text(
+        "📊 Resultado listo.\nSelecciona una opción:",
+        message.chat.id,
+        msg.message_id,
         reply_markup=markup
     )
 
-# ================= MANEJO DE BOTONES =================
+# ================= BOTONES =================
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
+
+    clean_expired_sessions()
 
     user_id = call.from_user.id
     data = user_results.get(user_id)
 
     if not data:
-        bot.answer_callback_query(call.id, "Sesión expirada.")
+        bot.answer_callback_query(call.id, "⏳ Resultados expirados (5 min).")
         return
 
-    # 🔵 MOSTRAR VÁLIDOS
     if call.data == "ver_validos":
 
         if not data["validos"]:
-            bot.send_message(call.message.chat.id, "No hay enlaces válidos.")
-            bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id, "No hay válidos.")
             return
 
         markup = InlineKeyboardMarkup()
 
         for grupo in data["validos"]:
-            nombre = grupo["name"]
-
-            if grupo["private"]:
-                nombre = f"🔒 {nombre}"
-
             markup.add(
                 InlineKeyboardButton(
-                    nombre,
+                    grupo["name"],
                     url=grupo["link"]
                 )
             )
 
         bot.send_message(
             call.message.chat.id,
-            "🔵 Enlaces disponibles:",
+            "🔵 Enlaces válidos:",
             reply_markup=markup
         )
 
-    # 🔴 MOSTRAR INVÁLIDOS
     elif call.data == "ver_invalidos":
 
         if not data["invalidos"]:
-            bot.send_message(call.message.chat.id, "No hay enlaces inválidos.")
-            bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id, "No hay inválidos.")
             return
 
         texto = "🔴 Enlaces no válidos:\n\n" + "\n".join(data["invalidos"])
@@ -210,7 +207,7 @@ def main():
         try:
             bot.infinity_polling(skip_pending=True, timeout=60)
         except Exception as e:
-            logging.error(f"Error en polling: {e}")
+            logging.error(f"Error polling: {e}")
 
 if __name__ == "__main__":
     main()

@@ -3,13 +3,14 @@ from flask import Flask
 from threading import Thread
 import os
 
+# Configuración del bot
 TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Online"
+    return "Bot de Enlaces Online"
 
 def run_server():
     port = int(os.environ.get('PORT', 8080))
@@ -17,21 +18,17 @@ def run_server():
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "¡Bot de enlaces activo! Envíame los links.")
+    bot.reply_to(message, "¡Bienvenido al Verificador de Enlaces! Envíame los links que quieres revisar.")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    # Por ahora solo confirma recepción, luego programamos la validación
-    bot.reply_to(message, "Recibido. Pronto validaré estos enlaces por ti.")
+    # Aquí es donde programaremos la lógica para verificar si el link sirve
+    bot.reply_to(message, "Recibí tu lista. Estoy preparándome para validarlos...")
 
 if __name__ == "__main__":
     Thread(target=run_server).start()
     bot.infinity_polling()
-:
-    return "OK", 200
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
+000))
     app_web.run(host="0.0.0.0", port=port)
 
 # =========================
